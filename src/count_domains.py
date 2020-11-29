@@ -13,7 +13,7 @@ INSTAGRAM_LINK_PATTERN = re.compile('')
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
 
 WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
-# WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/sample_warc.warc.gz"
+# WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
 
 
 conn = psycopg2.connect(
