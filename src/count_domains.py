@@ -8,12 +8,15 @@ from warcio.archiveiterator import ArchiveIterator
 from urllib.parse import unquote, urlparse
 import psycopg2
 import datetime
+import dateutil.parser
 
-INSTAGRAM_LINK_PATTERN = re.compile('')
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
+DOMAIN = "instagram.com"
+PROPER_DOMAIN = "https://www.instagram.com"
 
-WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
-# WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
+
+# WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
+WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
 
 
 conn = psycopg2.connect(
@@ -30,8 +33,19 @@ def create_tables():
     id              serial PRIMARY KEY,
     instagram_link  text UNIQUE,
     linked_count    int DEFAULT 0,
-    created_at      timestamp,
-    updated_at      timestamp
+    created_at      timestamptz,
+    updated_at      timestamptz
+    );
+    """
+
+    create_reference_links_sql="""
+    CREATE TABLE IF NOT EXISTS reference_links
+    (
+    id              serial PRIMARY KEY,
+    reference_link  text UNIQUE,
+    created_at      timestamptz,
+    updated_at      timestamptz,
+    warc_date       timestamptz
     );
     """
 
@@ -41,16 +55,17 @@ def create_tables():
     id                  serial PRIMARY KEY,
     instagram_link_id   integer REFERENCES instagram_links,
     instagram_link      text,
-    referenced_by       text,
-    created_at          timestamp,
-    updated_at          timestamp
+    reference_link_id   integer REFERENCES reference_links,
+    reference_link      text,
+    created_at          timestamptz,
+    updated_at          timestamptz
     );
     """
 
     create_run_status_sql="""
     CREATE TABLE IF NOT EXISTS last_run_time 
     (
-    time       timestamp DEFAULT CURRENT_TIMESTAMP(0)
+    time       timestamptz DEFAULT CURRENT_TIMESTAMP(0)
     );
     """
 
@@ -59,14 +74,14 @@ def create_tables():
     """.format(time = datetime.datetime.now())
 
     cur.execute(create_instagram_links_sql)
+    cur.execute(create_reference_links_sql)
     cur.execute(create_address_linked_by_sql)
     cur.execute(create_run_status_sql)
     cur.execute(insert_last_run_time_sql)
 
 create_tables()
 address_linked = []
-domain = "instagram.com"
-proper_domain = "https://www.instagram.com/"
+
 
 
 
@@ -75,7 +90,7 @@ counter = 0
 with open(WARC_ARCHIVE, 'rb') as stream:
     for record in ArchiveIterator(stream):
         if record.rec_type == 'response':
-            parser = BeautifulSoup(record.content_stream().read())
+            parser = BeautifulSoup(record.content_stream().read(), features="html.parser")
             counter+=1
             if counter > 100:
                 break
@@ -84,18 +99,26 @@ with open(WARC_ARCHIVE, 'rb') as stream:
                 for link in links:
                     href = link.attrs.get("href")
                     if href is not None:
-                        if domain in href and href.startswith("http"):
+                        if DOMAIN in href and href.startswith("http"):
                             path = urlparse(href).path
-                            instagram_link = proper_domain+path
+                            instagram_link = PROPER_DOMAIN+path
                             address_linked.append({
                                 'instagram_link': instagram_link, 
-                                'referencing_link': record.rec_headers.get_header('WARC-TARGET-URI'),
+                                'reference_link': record.rec_headers.get_header('WARC-TARGET-URI'),
+                                'warc_date': dateutil.parser.parse(record.rec_headers.get_header('WARC-Date'))
                                 })
+                            
 
 
 for link in address_linked:
     instagram_link = link['instagram_link']
-    referencing_link = link['referencing_link']
+    reference_link = link['reference_link']
+    warc_date = link['warc_date']
+
+    cur.execute("SELECT warc_date FROM reference_links WHERE reference_link = '{reference_link}'".format(reference_link = reference_link))
+    reference_db_warc_date =cur.fetchone()
+
+    if reference_db_warc_date is not None and reference_db_warc_date[0] >= warc_date: continue
 
     insert_instagram_links_sql="""
         INSERT INTO instagram_links
@@ -103,27 +126,54 @@ for link in address_linked:
         VALUES
         ('{instagram_link}', '{created_at}', '{updated_at}')
         ON CONFLICT DO NOTHING
-    """.format(instagram_link = instagram_link, created_at = datetime.datetime.now(), updated_at = datetime.datetime.now())
+        """.format(
+            instagram_link = instagram_link, 
+            created_at = datetime.datetime.now(), 
+            updated_at = datetime.datetime.now()
+            )
+
+    insert_reference_links_sql="""
+        INSERT INTO reference_links
+        (reference_link, created_at, updated_at, warc_date)
+        VALUES
+        ('{reference_link}', '{created_at}', '{updated_at}', '{warc_date}')
+        ON CONFLICT (reference_link) DO UPDATE 
+        SET updated_at = '{updated_at}', warc_date = '{warc_date}'
+        """.format(
+            reference_link= reference_link, 
+            created_at = datetime.datetime.now(), 
+            updated_at = datetime.datetime.now(), 
+            warc_date = warc_date,
+            )
+
+    remove_old_linked_by_sql="""
+        DELETE FROM address_linked_by
+        WHERE reference_link = '{reference_link}'
+    """.format(reference_link= reference_link)
 
     insert_linked_by_sql="""
         INSERT INTO address_linked_by
-        (instagram_link_id, instagram_link, referenced_by, created_at, updated_at)
+        (instagram_link_id, instagram_link, reference_link_id, reference_link, created_at, updated_at)
+        VALUES
         (
-            SELECT id,
+            (SELECT id FROM instagram_links WHERE instagram_link = '{instagram_link}'),
             '{instagram_link}',
-            '{referenced_by}',
+            (SELECT id FROM reference_links WHERE reference_link = '{reference_link}'),
+            '{reference_link}',
             '{created_at}',
             '{updated_at}'
-            FROM instagram_links WHERE instagram_link = '{instagram_link}'
         )
-    """.format(
-        instagram_link = instagram_link,
-        referenced_by = referencing_link,
-        created_at = datetime.datetime.now(),
-        updated_at = datetime.datetime.now(),
-        )
+        """.format(
+            instagram_link = instagram_link,
+            reference_link = reference_link,
+            created_at = datetime.datetime.now(),
+            updated_at = datetime.datetime.now(),
+            warc_date = warc_date,
+            )
 
     cur.execute(insert_instagram_links_sql)
+    cur.execute(insert_reference_links_sql)
+    cur.execute(remove_old_linked_by_sql)
     cur.execute(insert_linked_by_sql)
 
 count_links_sql = """
@@ -132,13 +182,13 @@ count_links_sql = """
     SELECT time FROM last_run_time
     ),
     recent_references as(
-    SELECT instagram_link_id, referenced_by
+    SELECT instagram_link_id, reference_link_id
     FROM address_linked_by alb
     CROSS JOIN last_run_time lrt
     WHERE alb.updated_at > lrt.time
     ),
     counts as (
-    SELECT instagram_link_id, count(referenced_by) as reference_count
+    SELECT instagram_link_id, count(reference_link_id) as reference_count
     FROM recent_references
     GROUP BY instagram_link_id
     ),
