@@ -15,8 +15,8 @@ DOMAIN = "instagram.com"
 PROPER_DOMAIN = "https://www.instagram.com"
 
 
-# WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
-WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
+WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
+# WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
 
 
 conn = psycopg2.connect(
@@ -79,21 +79,26 @@ def create_tables():
     cur.execute(create_run_status_sql)
     cur.execute(insert_last_run_time_sql)
 
+def create_indexes():
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS instagram_link_idx ON instagram_links (instagram_link);")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS reference_link_idx ON reference_links (reference_link);")
+    cur.execute("CREATE INDEX IF NOT EXISTS warc_date_idx ON reference_links (warc_date);")
+    cur.execute("CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (instagram_link, instagram_link_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (reference_link, reference_link_id)")
+
 create_tables()
+create_indexes()
+
+
 address_linked = []
-
-
-
-
-counter = 0
 
 with open(WARC_ARCHIVE, 'rb') as stream:
     for record in ArchiveIterator(stream):
         if record.rec_type == 'response':
-            parser = BeautifulSoup(record.content_stream().read(), features="html.parser")
-            counter+=1
-            if counter > 100:
-                break
+            try:
+                parser = BeautifulSoup(record.content_stream().read(), features="html.parser")
+            except:
+                continue
             links = parser.find_all("a")
             if links:
                 for link in links:
