@@ -120,7 +120,7 @@ for link in address_linked:
     reference_link = link['reference_link']
     warc_date = link['warc_date']
 
-    cur.execute("SELECT warc_date FROM reference_links WHERE reference_link = '{reference_link}'".format(reference_link = reference_link))
+    cur.execute("SELECT warc_date FROM reference_links WHERE reference_link = $${reference_link}$$".format(reference_link = reference_link))
     reference_db_warc_date =cur.fetchone()
 
     if reference_db_warc_date is not None and reference_db_warc_date[0] >= warc_date: continue
@@ -129,7 +129,7 @@ for link in address_linked:
         INSERT INTO instagram_links
         (instagram_link, created_at, updated_at)
         VALUES
-        ('{instagram_link}', '{created_at}', '{updated_at}')
+        ($${instagram_link}$$, '{created_at}', '{updated_at}')
         ON CONFLICT DO NOTHING
         """.format(
             instagram_link = instagram_link, 
@@ -141,7 +141,7 @@ for link in address_linked:
         INSERT INTO reference_links
         (reference_link, created_at, updated_at, warc_date)
         VALUES
-        ('{reference_link}', '{created_at}', '{updated_at}', '{warc_date}')
+        ($${reference_link}$$, '{created_at}', '{updated_at}', '{warc_date}')
         ON CONFLICT (reference_link) DO UPDATE 
         SET updated_at = '{updated_at}', warc_date = '{warc_date}'
         """.format(
@@ -153,7 +153,7 @@ for link in address_linked:
 
     remove_old_linked_by_sql="""
         DELETE FROM address_linked_by
-        WHERE reference_link = '{reference_link}'
+        WHERE reference_link = $${reference_link}$$
     """.format(reference_link= reference_link)
 
     insert_linked_by_sql="""
@@ -161,10 +161,10 @@ for link in address_linked:
         (instagram_link_id, instagram_link, reference_link_id, reference_link, created_at, updated_at)
         VALUES
         (
-            (SELECT id FROM instagram_links WHERE instagram_link = '{instagram_link}'),
-            '{instagram_link}',
-            (SELECT id FROM reference_links WHERE reference_link = '{reference_link}'),
-            '{reference_link}',
+            (SELECT id FROM instagram_links WHERE instagram_link = $${instagram_link}$$),
+            $${instagram_link}$$,
+            (SELECT id FROM reference_links WHERE reference_link = $${reference_link}$$),
+            $${reference_link}$$,
             '{created_at}',
             '{updated_at}'
         )
