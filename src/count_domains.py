@@ -13,167 +13,112 @@ from urllib.parse import unquote, urlparse
 import psycopg2
 import dateutil.parser
 
-import code; code.interact(local=dict(globals(), **locals()))
-exit()
-
 # Internal
-from .db.table import table
+from db.table import table
 
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
-DOMAIN = "instagram.com"
-PROPER_DOMAIN = "https://www.instagram.com"
 
+class etl_worker:
+    def __init__(
+            self,
+            archives,
+            domain_name="instagram",
+            domain="instagram.com",
+            proper_domain="https://www.instagram.com"
+    ):
+        self.data = []
+        self.domain_name = "instagram"
+        self.domain = domain
+        self.proper_domain = proper_domain
+        self.archives = archives
 
-WARC_ARCHIVE = str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz"
-# WARC_ARCHIVE = str(PROJECT_DIR)+'/tmp/example.warc.gz'
+    def create_tables(self):
+        self.instagram_links = table('instagram_links', cur)
+        self.reference_links = table('reference_links', cur)
+        self.address_linked_by = table('address_linked_by', cur)
+        self.last_run_time = table('last_run_time', cur)
 
+    def read_warc_archive(self, archive_path):
+        with open(archive_path, 'rb') as stream:
+            for record in ArchiveIterator(stream):
+                if record.rec_type == 'response':
+                    try:
+                        parser = BeautifulSoup(
+                            record.content_stream().read(), features="html.parser")
+                    except:
+                        continue
+                    links = parser.find_all("a")
+                    if links:
+                        for link in links:
+                            href = link.attrs.get("href")
+                            if href is not None:
+                                if self.domain in href and href.startswith("http"):
+                                    path = urlparse(href).path
+                                    domain_link = self.proper_domain+path
+                                    self.data.append({
+                                        '{0}_link'.format(self.domain_name): domain_link,
+                                        'reference_link': record.rec_headers.get_header('WARC-TARGET-URI'),
+                                        'warc_date': dateutil.parser.parse(record.rec_headers.get_header('WARC-Date'))
+                                    })
 
-conn = psycopg2.connect(
-    host="localhost",
-    dbname="cc_insta",
-    user="laitcl",
-    password="")
-cur = conn.cursor()
-
-def create_tables():
-    instagram_links = table('instagram_links')
-    reference_links = table('reference_links')
-    address_linked_by = table('address_linked_by')
-    last_run_time = table('last_run_time')
-
-
-create_tables()
-
-
-
-address_linked = []
-
-with open(WARC_ARCHIVE, 'rb') as stream:
-    for record in ArchiveIterator(stream):
-        if record.rec_type == 'response':
-            try:
-                parser = BeautifulSoup(record.content_stream().read(), features="html.parser")
-            except:
+    def insert_data_to_db(self):
+        for link in self.data:
+            domain_link = link['{0}_link'.format(self.domain_name)]
+            reference_link = link['reference_link']
+            warc_date = link['warc_date']
+            self.reference_links.custom_action("select_warc_date", reference_link)
+            reference_db_warc_date = cur.fetchone()
+            if reference_db_warc_date is not None and reference_db_warc_date[0] >= warc_date:
                 continue
-            links = parser.find_all("a")
-            if links:
-                for link in links:
-                    href = link.attrs.get("href")
-                    if href is not None:
-                        if DOMAIN in href and href.startswith("http"):
-                            path = urlparse(href).path
-                            instagram_link = PROPER_DOMAIN+path
-                            address_linked.append({
-                                'instagram_link': instagram_link, 
-                                'reference_link': record.rec_headers.get_header('WARC-TARGET-URI'),
-                                'warc_date': dateutil.parser.parse(record.rec_headers.get_header('WARC-Date'))
-                                })
-                            
+            self.insert_statements(link)
+        self.instagram_links.custom_action("count_links")
+        self.last_run_time.custom_action(
+            "update_last_run_time", datetime.datetime.now())
 
-
-for link in address_linked:
-    instagram_link = link['instagram_link']
-    reference_link = link['reference_link']
-    warc_date = link['warc_date']
-
-    cur.execute("SELECT warc_date FROM reference_links WHERE reference_link = $${reference_link}$$".format(reference_link = reference_link))
-    reference_db_warc_date =cur.fetchone()
-
-    if reference_db_warc_date is not None and reference_db_warc_date[0] >= warc_date: continue
-
-    insert_instagram_links_sql="""
-        INSERT INTO instagram_links
-        (instagram_link, created_at, updated_at)
-        VALUES
-        ($${instagram_link}$$, '{created_at}', '{updated_at}')
-        ON CONFLICT DO NOTHING
-        """.format(
-            instagram_link = instagram_link, 
-            created_at = datetime.datetime.now(), 
-            updated_at = datetime.datetime.now()
-            )
-
-    insert_reference_links_sql="""
-        INSERT INTO reference_links
-        (reference_link, created_at, updated_at, warc_date)
-        VALUES
-        ($${reference_link}$$, '{created_at}', '{updated_at}', '{warc_date}')
-        ON CONFLICT (reference_link) DO UPDATE 
-        SET updated_at = '{updated_at}', warc_date = '{warc_date}'
-        """.format(
-            reference_link= reference_link, 
-            created_at = datetime.datetime.now(), 
-            updated_at = datetime.datetime.now(), 
-            warc_date = warc_date,
-            )
-
-    remove_old_linked_by_sql="""
-        DELETE FROM address_linked_by
-        WHERE reference_link = $${reference_link}$$
-    """.format(reference_link= reference_link)
-
-    insert_linked_by_sql="""
-        INSERT INTO address_linked_by
-        (instagram_link_id, instagram_link, reference_link_id, reference_link, created_at, updated_at)
-        VALUES
-        (
-            (SELECT id FROM instagram_links WHERE instagram_link = $${instagram_link}$$),
-            $${instagram_link}$$,
-            (SELECT id FROM reference_links WHERE reference_link = $${reference_link}$$),
-            $${reference_link}$$,
-            '{created_at}',
-            '{updated_at}'
+    def insert_statements(self, link):
+        domain_link = link['{0}_link'.format(self.domain_name)]
+        reference_link = link['reference_link']
+        warc_date = link['warc_date']
+        self.instagram_links.simple_insert(
+            {"{0}_link".format(self.domain_name): domain_link,
+             "created_at": datetime.datetime.now(),
+             "updated_at": datetime.datetime.now()},
+            "ON CONFLICT DO NOTHING"
         )
-        """.format(
-            instagram_link = instagram_link,
-            reference_link = reference_link,
-            created_at = datetime.datetime.now(),
-            updated_at = datetime.datetime.now(),
-            warc_date = warc_date,
-            )
+        self.reference_links.simple_insert(
+            {"reference_link": reference_link,
+             "created_at": datetime.datetime.now(),
+             "updated_at": datetime.datetime.now(),
+             "warc_date": warc_date},
+            "ON CONFLICT (reference_link) DO UPDATE SET updated_at = '{0}', warc_date = '{1}'".format(datetime.datetime.now(), warc_date)
+        )
+        self.address_linked_by.custom_action("remove_old_linked_by", reference_link)
+        self.address_linked_by.custom_action("insert_linked_by", domain_link, reference_link,
+                                        datetime.datetime.now(), datetime.datetime.now())
 
-    cur.execute(insert_instagram_links_sql)
-    cur.execute(insert_reference_links_sql)
-    cur.execute(remove_old_linked_by_sql)
-    cur.execute(insert_linked_by_sql)
 
-count_links_sql = """
-    with 
-    last_run as(
-    SELECT time FROM last_run_time
-    ),
-    recent_references as(
-    SELECT instagram_link_id, reference_link_id
-    FROM address_linked_by alb
-    CROSS JOIN last_run_time lrt
-    WHERE alb.updated_at > lrt.time
-    ),
-    counts as (
-    SELECT instagram_link_id, count(reference_link_id) as reference_count
-    FROM recent_references
-    GROUP BY instagram_link_id
-    ),
-    summed as(
-    SELECT 
-        il.id as id, 
-        il.linked_count + c.reference_count as total_count
-    FROM instagram_links il
-    JOIN counts c on il.id = c.instagram_link_id
-    )
-    UPDATE instagram_links il2
-    SET linked_count = total_count
-    FROM summed
-    WHERE summed.id = il2.id
-"""
+def main():
+    conn = psycopg2.connect(
+        host="localhost",
+        dbname="cc_insta",
+        user="laitcl",
+        password="")
+    
+    cur = conn.cursor()
 
-cur.execute(count_links_sql)
+    archives = [  # str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz",
+        str(PROJECT_DIR)+'/tmp/example.warc.gz']
 
-update_last_run_time_sql = """
-UPDATE last_run_time
-SET time = '{time}'
-""".format(time = datetime.datetime.now())
+    instagram_counter = etl_worker(archives)
 
-cur.execute(update_last_run_time_sql)
+    instagram_counter.create_tables()
 
-conn.commit()
-conn.close()
+    for archive in instagram_counter.archives:
+        instagram_counter.read_warc_archive(archive)
+    instagram_counter.insert_data_to_db()
+
+    conn.commit()
+    conn.close()
+
+if __name__ == '__main__':
+    main()

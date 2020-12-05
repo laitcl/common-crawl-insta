@@ -1,3 +1,5 @@
+import datetime
+
 table_definitions = {
     "instagram_links" : {
         "create_table" : """
@@ -11,7 +13,7 @@ table_definitions = {
                 );
             """,
         "create_index" : ["CREATE UNIQUE INDEX IF NOT EXISTS instagram_link_idx ON instagram_links (instagram_link);"],
-        count_links = """
+        "count_links" : """
             with 
             last_run as(
             SELECT time FROM last_run_time
@@ -53,6 +55,7 @@ table_definitions = {
             """,
         "create_index" : ["CREATE UNIQUE INDEX IF NOT EXISTS reference_link_idx ON reference_links (reference_link);",
                           "CREATE INDEX IF NOT EXISTS warc_date_idx ON reference_links (warc_date);"],
+        "select_warc_date" : "SELECT warc_date FROM reference_links WHERE reference_link = $${0}$$",
     },
     "address_linked_by" : {
         "create_table" : """
@@ -82,8 +85,7 @@ table_definitions = {
                 (SELECT id FROM reference_links WHERE reference_link = $${1}$$),
                 $${1}$$,
                 '{2}',
-                '{3}',
-                '{4}'
+                '{3}'
             )
             """,
     },
