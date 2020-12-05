@@ -1,3 +1,4 @@
 tmp/
 cc-env/
 activate
+*__pychache__*

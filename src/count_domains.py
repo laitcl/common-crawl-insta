@@ -1,14 +1,23 @@
+# Standard libraries
 import os
 from pathlib import Path
 import re
 import gzip
-from bs4 import BeautifulSoup
 from io import StringIO
+import datetime
+
+# Third Parties
+from bs4 import BeautifulSoup
 from warcio.archiveiterator import ArchiveIterator
 from urllib.parse import unquote, urlparse
 import psycopg2
-import datetime
 import dateutil.parser
+
+import code; code.interact(local=dict(globals(), **locals()))
+exit()
+
+# Internal
+from .db.table import table
 
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
 DOMAIN = "instagram.com"
@@ -27,67 +36,14 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 def create_tables():
-    create_instagram_links_sql="""
-    CREATE TABLE IF NOT EXISTS instagram_links
-    (
-    id              serial PRIMARY KEY,
-    instagram_link  text UNIQUE,
-    linked_count    int DEFAULT 0,
-    created_at      timestamptz,
-    updated_at      timestamptz
-    );
-    """
+    instagram_links = table('instagram_links')
+    reference_links = table('reference_links')
+    address_linked_by = table('address_linked_by')
+    last_run_time = table('last_run_time')
 
-    create_reference_links_sql="""
-    CREATE TABLE IF NOT EXISTS reference_links
-    (
-    id              serial PRIMARY KEY,
-    reference_link  text UNIQUE,
-    created_at      timestamptz,
-    updated_at      timestamptz,
-    warc_date       timestamptz
-    );
-    """
-
-    create_address_linked_by_sql="""
-    CREATE TABLE IF NOT EXISTS address_linked_by 
-    (
-    id                  serial PRIMARY KEY,
-    instagram_link_id   integer REFERENCES instagram_links,
-    instagram_link      text,
-    reference_link_id   integer REFERENCES reference_links,
-    reference_link      text,
-    created_at          timestamptz,
-    updated_at          timestamptz
-    );
-    """
-
-    create_run_status_sql="""
-    CREATE TABLE IF NOT EXISTS last_run_time 
-    (
-    time       timestamptz DEFAULT CURRENT_TIMESTAMP(0)
-    );
-    """
-
-    insert_last_run_time_sql="""
-    INSERT INTO last_run_time (time) SELECT '{time}' WHERE NOT EXISTS (SELECT time from last_run_time)
-    """.format(time = datetime.datetime.now())
-
-    cur.execute(create_instagram_links_sql)
-    cur.execute(create_reference_links_sql)
-    cur.execute(create_address_linked_by_sql)
-    cur.execute(create_run_status_sql)
-    cur.execute(insert_last_run_time_sql)
-
-def create_indexes():
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS instagram_link_idx ON instagram_links (instagram_link);")
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS reference_link_idx ON reference_links (reference_link);")
-    cur.execute("CREATE INDEX IF NOT EXISTS warc_date_idx ON reference_links (warc_date);")
-    cur.execute("CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (instagram_link, instagram_link_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (reference_link, reference_link_id)")
 
 create_tables()
-create_indexes()
+
 
 
 address_linked = []
