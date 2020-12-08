@@ -14,9 +14,17 @@ import psycopg2
 import dateutil.parser
 
 # Internal
-from db.table import table
+from .db.table import table
 
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
+
+conn = psycopg2.connect(
+    host="localhost",
+    dbname="cc_insta",
+    user="laitcl",
+    password="")
+
+cur = conn.cursor()
 
 class etl_worker:
     def __init__(
@@ -98,14 +106,6 @@ class etl_worker:
 
 
 def main():
-    conn = psycopg2.connect(
-        host="localhost",
-        dbname="cc_insta",
-        user="laitcl",
-        password="")
-    
-    cur = conn.cursor()
-
     archives = [  # str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz",
         str(PROJECT_DIR)+'/tmp/example.warc.gz']
 
