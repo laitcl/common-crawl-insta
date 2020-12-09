@@ -115,8 +115,7 @@ def main():
 
     db_string="dbname=localhost user={user} dbname=cc_insta".format(user = getpass.getuser())
 
-    archives = [  # str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz",
-        str(PROJECT_DIR)+'/tmp/example.warc.gz']
+    archives = [str(PROJECT_DIR)+'/tmp/example.warc.gz']
 
     instagram_counter = etl_worker(archives, db_string)
 
