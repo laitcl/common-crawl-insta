@@ -5,6 +5,7 @@ import re
 import gzip
 from io import StringIO
 import datetime
+import sys
 
 # Third Parties
 from bs4 import BeautifulSoup
@@ -12,16 +13,21 @@ from warcio.archiveiterator import ArchiveIterator
 from urllib.parse import unquote, urlparse
 import psycopg2
 import dateutil.parser
+import getpass
 
 # Internal
+SRC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
+PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
+sys.path.append(str(SRC_DIR)+'/')
 from db.table import table
 
-PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
+
 
 class etl_worker:
     def __init__(
             self,
             archives,
+            db_string,
             domain_name="instagram",
             domain="instagram.com",
             proper_domain="https://www.instagram.com"
@@ -31,12 +37,20 @@ class etl_worker:
         self.domain = domain
         self.proper_domain = proper_domain
         self.archives = archives
+        # db_string has the following format
+        # "dbname=localhost user={user} dbname=cc_insta"
+
+        self.conn = psycopg2.connect(db_string)
+        self.cur = self.conn.cursor()
+
+
+
 
     def create_tables(self):
-        self.instagram_links = table('instagram_links', cur)
-        self.reference_links = table('reference_links', cur)
-        self.address_linked_by = table('address_linked_by', cur)
-        self.last_run_time = table('last_run_time', cur)
+        self.instagram_links = table('instagram_links', self.cur)
+        self.reference_links = table('reference_links', self.cur)
+        self.address_linked_by = table('address_linked_by', self.cur)
+        self.last_run_time = table('last_run_time', self.cur)
 
     def read_warc_archive(self, archive_path):
         with open(archive_path, 'rb') as stream:
@@ -67,7 +81,7 @@ class etl_worker:
             reference_link = link['reference_link']
             warc_date = link['warc_date']
             self.reference_links.custom_action("select_warc_date", reference_link)
-            reference_db_warc_date = cur.fetchone()
+            reference_db_warc_date = self.cur.fetchone()
             if reference_db_warc_date is not None and reference_db_warc_date[0] >= warc_date:
                 continue
             self.insert_statements(link)
@@ -98,18 +112,13 @@ class etl_worker:
 
 
 def main():
-    conn = psycopg2.connect(
-        host="localhost",
-        dbname="cc_insta",
-        user="laitcl",
-        password="")
-    
-    cur = conn.cursor()
+
+    db_string="dbname=localhost user={user} dbname=cc_insta".format(user = getpass.getuser())
 
     archives = [  # str(PROJECT_DIR) + "/tmp/CC-MAIN-20201101001251-20201101031251-00719.warc.gz",
         str(PROJECT_DIR)+'/tmp/example.warc.gz']
 
-    instagram_counter = etl_worker(archives)
+    instagram_counter = etl_worker(archives, db_string)
 
     instagram_counter.create_tables()
 
@@ -117,8 +126,8 @@ def main():
         instagram_counter.read_warc_archive(archive)
     instagram_counter.insert_data_to_db()
 
-    conn.commit()
-    conn.close()
+    instagram_counter.conn.commit()
+    instagram_counter.conn.close()
 
 if __name__ == '__main__':
     main()
