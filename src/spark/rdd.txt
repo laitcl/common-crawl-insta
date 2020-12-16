@@ -1,1 +1,1 @@
-tmp/example.warc.gz
+/home/laitcl/Projects/common-crawl-insta/tmp/example.warc.gz

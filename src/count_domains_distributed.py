@@ -1,19 +1,28 @@
 import logging
 import re
 import os
+from pathlib import Path
+import sys
+from operator import add
 
 from tempfile import TemporaryFile
+import dateutil.parser
+
+import boto3
+import botocore
 
 from bs4 import BeautifulSoup
 from warcio.archiveiterator import ArchiveIterator
+from warcio.recordloader import ArchiveLoadFailed
 from urllib.parse import unquote, urlparse
 
 from pyspark import SparkContext, SparkConf
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, SQLContext, Row
 from pyspark.sql.types import StructType, StructField, StringType, LongType
 
 SRC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
+LOGGING_FORMAT = '%(asctime)s %(levelname)s %(name)s: %(message)s'
 
 class CCSpark:
     log_level = 'INFO'
@@ -21,8 +30,8 @@ class CCSpark:
 
     def __init__(self):
         self.name = "common-crawl-insta"
-        self.tmp_dir = SRC_DIR + "/tmp/"
-        self.text_file = SRC_DIR + "/spark/rdd.txt"
+        self.tmp_dir = str(SRC_DIR) + "/tmp/"
+        self.text_file = str(SRC_DIR) + "/spark/rdd.txt"
         self.domain_name = "instagram"
         self.domain = "instagram.com"
         self.proper_domain = "https://www.instagram.com"
@@ -37,23 +46,29 @@ class CCSpark:
         conf = SparkConf()
 
         sc = SparkContext(appName=self.name, conf=conf)
-        sqlc = SQLContext(spark_context=sc)
+        sqlc = SQLContext(sparkContext=sc)
 
         self.init_accumulators(sc)
-
         self.run_job(sc, sqlc)
 
         sc.stop()
 
     def run_job(self, sc, sqlc):
+        spark = SparkSession.builder.getOrCreate()
         input_data = sc.textFile(self.text_file, minPartitions=400)
 
-        output = input_data.mapPartitionsWithIndex(self.process_warcs).reduceByKey(self.reduce_by_key_func)
+        output = input_data.mapPartitionsWithIndex(self.process_warcs).reduce(add)
 
         output_json = sc.parallelize(output)
-        df = sqlc.read.json(output_json)
 
-        print(df)
+        df = output_json.toDF()
+        # df = sqlc.read.json(output_json, multiLine=True)
+
+        self.get_logger().info(df.show())
+        self.get_logger().info("\x1b[32;1m print_above")
+
+
+        self.log_aggregators(sc)
 
     def process_warcs(self, id_, iterator):
         s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -152,5 +167,27 @@ class CCSpark:
                         }]
                         yield link_data
 
-    def reduce_by_key_func(a, b):
-        return a + b
+    def reduce_func(a, b):
+        return a.append(b)
+
+    def get_logger(self, spark_context=None):
+        """Get logger from SparkContext or (if None) from logging module"""
+        if spark_context is None:
+            return logging.getLogger(self.name)
+        return spark_context._jvm.org.apache.log4j.LogManager \
+            .getLogger(self.name)
+
+    def log_aggregator(self, sc, agg, descr):
+        self.get_logger(sc).info(descr.format(agg.value))
+
+    def log_aggregators(self, sc):
+        self.log_aggregator(sc, self.warc_input_processed,
+                            'WARC/WAT/WET input files processed = {}')
+        self.log_aggregator(sc, self.warc_input_failed,
+                            'WARC/WAT/WET input files failed = {}')
+        self.log_aggregator(sc, self.records_processed,
+                            'WARC/WAT/WET records processed = {}')
+
+if __name__ == '__main__':
+    job = CCSpark()
+    job.run()
