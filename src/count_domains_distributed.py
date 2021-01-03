@@ -17,7 +17,7 @@ from warcio.recordloader import ArchiveLoadFailed
 from urllib.parse import unquote, urlparse
 
 from pyspark import SparkContext, SparkConf
-from pyspark.sql import SparkSession, SQLContext, Row
+from pyspark.sql import SparkSession, SQLContext, Row, DataFrameWriter
 from pyspark.sql.types import StructType, StructField, StringType, LongType
 
 SRC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
@@ -54,21 +54,20 @@ class CCSpark:
         sc.stop()
 
     def run_job(self, sc, sqlc):
-        spark = SparkSession.builder.getOrCreate()
         input_data = sc.textFile(self.text_file, minPartitions=400)
-
+        
         output = input_data.mapPartitionsWithIndex(self.process_warcs).reduce(add)
 
         output_json = sc.parallelize(output)
 
-        df = output_json.toDF()
-        # df = sqlc.read.json(output_json, multiLine=True)
+        self.reference_to_instagram_df = output_json.toDF()
 
-        self.get_logger().info(df.show())
+        self.get_logger().info(self.reference_to_instagram_df.show())
         self.get_logger().info("\x1b[32;1m print_above")
 
-
         self.log_aggregators(sc)
+
+        self.insert_to_db(spark)
 
     def process_warcs(self, id_, iterator):
         s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -167,9 +166,6 @@ class CCSpark:
                         }]
                         yield link_data
 
-    def reduce_func(a, b):
-        return a.append(b)
-
     def get_logger(self, spark_context=None):
         """Get logger from SparkContext or (if None) from logging module"""
         if spark_context is None:
@@ -187,6 +183,17 @@ class CCSpark:
                             'WARC/WAT/WET input files failed = {}')
         self.log_aggregator(sc, self.records_processed,
                             'WARC/WAT/WET records processed = {}')
+
+    def insert_to_db(self, spark_sesion):
+        mode = "overwrite"
+        db_url = "jdbc:postgresql://localhost:5432/cc_insta"
+        properties = {"user": "laitcl", "password":""}
+        table = "test_result"
+
+        my_writer = DataFrameWriter(self.reference_to_instagram_df)
+
+        my_writer.jdbc(db_url, table, mode, properties)
+        
 
 if __name__ == '__main__':
     job = CCSpark()
