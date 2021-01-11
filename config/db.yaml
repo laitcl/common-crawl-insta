@@ -1,0 +1,6 @@
+cc_insta:
+  url: jdbc:postgresql://localhost:5432/cc_insta
+  schema: public
+  username: laitcl
+  password: ex@ample_p@ss1
+  driver: org.postgresql.Driver

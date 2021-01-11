@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 from operator import add
+import yaml
 
 from tempfile import TemporaryFile
 import dateutil.parser
@@ -17,12 +18,17 @@ from warcio.recordloader import ArchiveLoadFailed
 from urllib.parse import unquote, urlparse
 
 from pyspark import SparkContext, SparkConf
-from pyspark.sql import SparkSession, SQLContext, Row, DataFrameWriter
+from pyspark.sql import SparkSession, SQLContext, Row, DataFrameWriter, Window
+from pyspark.sql.functions import rank, col, monotonically_increasing_id
 from pyspark.sql.types import StructType, StructField, StringType, LongType
+import findspark
+findspark.init()
 
 SRC_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
+
 PROJECT_DIR = Path(os.path.dirname(os.path.realpath(__file__))).parent
 LOGGING_FORMAT = '%(asctime)s %(levelname)s %(name)s: %(message)s'
+
 
 class CCSpark:
     log_level = 'INFO'
@@ -39,8 +45,7 @@ class CCSpark:
     def init_accumulators(self, sc):
         self.records_processed = sc.accumulator(0)
         self.warc_input_processed = sc.accumulator(0)
-        self.warc_input_failed=sc.accumulator(0)
-
+        self.warc_input_failed = sc.accumulator(0)
 
     def run(self):
         conf = SparkConf()
@@ -54,20 +59,26 @@ class CCSpark:
         sc.stop()
 
     def run_job(self, sc, sqlc):
-        input_data = sc.textFile(self.text_file, minPartitions=400)
-        
-        output = input_data.mapPartitionsWithIndex(self.process_warcs).reduce(add)
+        input_data = sc.textFile(self.text_file, minPartitions=4)
+
+        output = input_data.mapPartitionsWithIndex(
+            self.process_warcs).reduce(add)
 
         output_json = sc.parallelize(output)
 
-        self.reference_to_instagram_df = output_json.toDF()
+        self.reference_to_instagram_df = output_json.toDF() \
+                                            .orderBy("reference_link", "warc_date") \
 
-        self.get_logger().info(self.reference_to_instagram_df.show())
-        self.get_logger().info("\x1b[32;1m print_above")
+        window = Window.partitionBy("instagram_link", "reference_link").orderBy("warc_date",'tiebreak')
+        self.reference_to_instagram_df = (self.reference_to_instagram_df
+         .withColumn('tiebreak', monotonically_increasing_id())
+         .withColumn('rank', rank().over(window))
+         .filter(col('rank') == 1).drop('rank','tiebreak'))
+
 
         self.log_aggregators(sc)
 
-        self.insert_to_db(spark)
+        self.prepare_csv(sc, sqlc)
 
     def process_warcs(self, id_, iterator):
         s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -102,7 +113,7 @@ class CCSpark:
 
                 warctemp.seek(0)
 
-                stream=warctemp
+                stream = warctemp
             else:
                 self.get_logger().info('Reading local stream {}'.format(uri))
                 if uri.startswith('file:'):
@@ -184,16 +195,41 @@ class CCSpark:
         self.log_aggregator(sc, self.records_processed,
                             'WARC/WAT/WET records processed = {}')
 
-    def insert_to_db(self, spark_sesion):
-        mode = "overwrite"
-        db_url = "jdbc:postgresql://localhost:5432/cc_insta"
-        properties = {"user": "laitcl", "password":""}
-        table = "test_result"
+    def prepare_csv(self, sc, sqlc):
+        with open(str(PROJECT_DIR) + "/config/db.yaml") as ymlfile:
+            cfg = yaml.load(ymlfile)
 
-        my_writer = DataFrameWriter(self.reference_to_instagram_df)
+        db_properties = {}
+        db_url = cfg['cc_insta']['url']
+        db_properties['username'] = cfg['cc_insta']['username']
+        db_properties['password'] = cfg['cc_insta']['password']
+        db_properties['url'] = cfg['cc_insta']['url']
+        db_properties['driver'] = cfg['cc_insta']['driver']
 
-        my_writer.jdbc(db_url, table, mode, properties)
-        
+        reference_pairs = self.reference_to_instagram_df.alias("reference_pairs")
+        reference_links = sqlc.read.jdbc(
+            url=db_url, table='public.reference_links', properties=db_properties)
+
+        reference_links = reference_links.alias("reference_links")
+
+        reference_pairs = reference_pairs.selectExpr([col + ' as rp_' + col for col in reference_pairs.columns])
+        reference_links = reference_links.selectExpr([col + ' as rl_' + col for col in reference_links.columns])
+
+        df = reference_pairs.join(
+            reference_links, 
+            reference_pairs.rp_reference_link == reference_links.rl_reference_link, 
+            how='left')
+
+        df.createOrReplaceTempView("joined_references")
+
+        remove_references = sqlc.sql("select distinct rp_reference_link from joined_references where rp_warc_date > rl_warc_date")
+        new_reference_pairs = sqlc.sql("select rp_instagram_link, rp_reference_link, rp_warc_date from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date)")
+        new_reference_links = sqlc.sql("select rp_reference_link, max(rp_warc_date) as rp_warc_date from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date) group by rp_reference_link")
+
+        remove_references.coalesce(1).write.csv(self.tmp_dir+'remove_references.csv')
+        new_reference_pairs.coalesce(1).write.csv(self.tmp_dir+'new_reference_pairs.csv')
+        new_reference_links.coalesce(1).write.csv(self.tmp_dir+'new_reference_links.csv')
+
 
 if __name__ == '__main__':
     job = CCSpark()
