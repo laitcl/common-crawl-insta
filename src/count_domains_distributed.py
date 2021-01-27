@@ -46,7 +46,7 @@ class CCSpark:
 
     def create_db_connection(self):
         with open(str(PROJECT_DIR) + "/config/db.yaml") as ymlfile:
-            cfg = yaml.load(ymlfile)
+            cfg = yaml.load(ymlfile, Loader=yaml.FullLoader)
 
         hostname = cfg['cc_insta']['hostname']
         port = cfg['cc_insta']['port']
@@ -64,7 +64,7 @@ class CCSpark:
         self.db_properties['driver'] = driver
 
         # This section does the psycopg2 connection, used for different circumstances
-        db_string = "dbname={host} user={user} dbname={db}".format(host=hostname, user=username, db=database)
+        db_string = "host={host} user={user} dbname={db}".format(host=hostname, user=username, db=database)
         self.conn = psycopg2.connect(db_string)
         self.cur = self.conn.cursor()
 
@@ -118,10 +118,6 @@ class CCSpark:
 
         finally:
             self.cleanup_csvs()
-
-        self.new_instagram_links.show()
-        self.new_reference_links.show()
-        self.new_reference_pairs.show()
 
     def process_warcs(self, id_, iterator):
         s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -275,7 +271,7 @@ class CCSpark:
         self.new_reference_links = self.add_date_columns(self.new_reference_links)
         self.new_reference_links.coalesce(1).write.csv(self.tmp_dir+'new_reference_links')
 
-        self.new_instagram_links = sqlc.sql("select distinct rp_instagram_link from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date) group by rp_instagram_link")
+        self.new_instagram_links = sqlc.sql("select distinct rp_instagram_link from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date)")
         self.new_instagram_links = self.new_instagram_links.withColumn("linked_count", lit(0))
         self.new_instagram_links = self.add_date_columns(self.new_instagram_links)
         self.new_instagram_links.coalesce(1).write.csv(self.tmp_dir+'new_instagram_links')

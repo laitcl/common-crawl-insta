@@ -4,5 +4,5 @@ cc_insta:
   schema: public
   username: laitcl
   database: cc_insta
-  password: ex@ample_p@ss1
+  password: ex@mple_p@ss1
   driver: org.postgresql.Driver
