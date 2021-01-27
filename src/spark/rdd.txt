@@ -1,3 +1,2 @@
-/home/laitcl/Projects/common-crawl-insta/tmp/example3.warc.gz
+/home/laitcl/Projects/common-crawl-insta/tmp/example4.warc.gz
 s3://commoncrawl/crawl-data/CC-MAIN-2021-04/segments/1610704800238.80/warc/CC-MAIN-20210126135838-20210126165838-00196.warc.gz
-s3://commoncrawl/crawl-data/CC-MAIN-2021-04/segments/1610704800238.80/warc/CC-MAIN-20210126135838-20210126165838-00194.warc.gz

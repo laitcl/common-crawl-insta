@@ -117,7 +117,8 @@ class CCSpark:
             self.conn.close()
 
         finally:
-            self.cleanup_csvs()
+            pass
+            #self.cleanup_csvs()
 
     def process_warcs(self, id_, iterator):
         s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -209,6 +210,8 @@ class CCSpark:
                     if self.domain in href and href.startswith("http"):
                         path = urlparse(href).path
                         domain_link = self.proper_domain+path
+                        if domain_link[-1] != '/':
+                            domain_link += '/'
                         link_data = [{
                             '{0}_link'.format(self.domain_name): domain_link,
                             'reference_link': record.rec_headers.get_header('WARC-TARGET-URI'),
@@ -271,7 +274,7 @@ class CCSpark:
         self.new_reference_links = self.add_date_columns(self.new_reference_links)
         self.new_reference_links.coalesce(1).write.csv(self.tmp_dir+'new_reference_links')
 
-        self.new_instagram_links = sqlc.sql("select distinct rp_instagram_link from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date)")
+        self.new_instagram_links = sqlc.sql("select max(rp_instagram_link) from joined_references where (rl_warc_date is null) or (rp_warc_date > rl_warc_date) GROUP BY rp_instagram_link")
         self.new_instagram_links = self.new_instagram_links.withColumn("linked_count", lit(0))
         self.new_instagram_links = self.add_date_columns(self.new_instagram_links)
         self.new_instagram_links.coalesce(1).write.csv(self.tmp_dir+'new_instagram_links')
