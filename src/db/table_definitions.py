@@ -19,27 +19,27 @@ table_definitions = {
             SELECT time FROM last_run_time
             ),
             recent_references as(
-            SELECT instagram_link_id, reference_link_id
+            SELECT alb.instagram_link, alb.reference_link
             FROM address_linked_by alb
             CROSS JOIN last_run_time lrt
             WHERE alb.updated_at > lrt.time
             ),
             counts as (
-            SELECT instagram_link_id, count(reference_link_id) as reference_count
+            SELECT instagram_link, count(reference_link) as reference_count
             FROM recent_references
-            GROUP BY instagram_link_id
+            GROUP BY instagram_link
             ),
             summed as(
             SELECT 
-                il.id as id, 
-                il.linked_count + c.reference_count as total_count
+                il.instagram_link, 
+                c.reference_count
             FROM instagram_links il
-            JOIN counts c on il.id = c.instagram_link_id
+            JOIN counts c on il.instagram_link = c.instagram_link
             )
             UPDATE instagram_links il2
-            SET linked_count = total_count
+            SET linked_count = reference_count
             FROM summed
-            WHERE summed.id = il2.id
+            WHERE summed.instagram_link = il2.instagram_link;
             """,
     },
     "reference_links" : {
@@ -93,8 +93,7 @@ table_definitions = {
             time       timestamptz DEFAULT CURRENT_TIMESTAMP(0)
             );
             """,
-        "create_index" : ["CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (instagram_link, instagram_link_id)",
-                          "CREATE INDEX IF NOT EXISTS instagram_link_idx on address_linked_by (reference_link, reference_link_id)"],
+        "create_index" : [],
         "seed" : "INSERT INTO last_run_time (time) SELECT '{time}' WHERE NOT EXISTS (SELECT time from last_run_time)".format(time = datetime.datetime.now()),
         "update_last_run_time" : """
             UPDATE last_run_time

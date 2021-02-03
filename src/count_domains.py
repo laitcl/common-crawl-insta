@@ -6,6 +6,7 @@ import gzip
 from io import StringIO
 import datetime
 import sys
+import yaml
 
 # Third Parties
 from bs4 import BeautifulSoup
@@ -111,9 +112,25 @@ class etl_worker:
                                         datetime.datetime.now(), datetime.datetime.now())
 
 
+def create_db_string():
+    with open(str(PROJECT_DIR) + "/config/db.yaml") as ymlfile:
+        cfg = yaml.load(ymlfile, Loader=yaml.FullLoader)
+
+    hostname = cfg['cc_insta']['hostname']
+    port = cfg['cc_insta']['port']
+    username = cfg['cc_insta']['username']
+    password = cfg['cc_insta']['password']
+    driver = cfg['cc_insta']['driver']
+    database = cfg['cc_insta']['database']
+    db_url = "jdbc:postgresql://{host}:{port}/{db}".format(host=hostname, port=port, db=database)
+
+    # This section does the psycopg2 connection, used for different circumstances
+    db_string = "host={host} user={user} dbname={db}".format(host=hostname, user=username, db=database)
+    return db_string
+
 def main():
 
-    db_string="dbname=localhost user={user} dbname=cc_insta".format(user = getpass.getuser())
+    db_string=create_db_string()
 
     archives = [str(PROJECT_DIR)+'/tmp/example3.warc.gz']
 
