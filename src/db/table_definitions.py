@@ -62,27 +62,24 @@ table_definitions = {
             CREATE TABLE IF NOT EXISTS address_linked_by 
             (
             id                  serial PRIMARY KEY,
-            instagram_link_id   integer REFERENCES instagram_links,
             instagram_link      text,
-            reference_link_id   integer REFERENCES reference_links,
             reference_link      text,
             created_at          timestamptz,
             updated_at          timestamptz
             );
             """,
-        "create_index" : ["CREATE UNIQUE INDEX IF NOT EXISTS instagram_link_idx ON instagram_links (instagram_link);"],
+        "create_index" : ["CREATE INDEX IF NOT EXISTS alb_instagram_link_idx ON address_linked_by (instagram_link);",
+                          "CREATE INDEX IF NOT EXISTS alb_reference_link_idx ON address_linked_by (reference_link);"],
         "remove_old_linked_by": """
             DELETE FROM address_linked_by
             WHERE reference_link = $${0}$$
             """,
         "insert_linked_by" : """
             INSERT INTO address_linked_by
-            (instagram_link_id, instagram_link, reference_link_id, reference_link, created_at, updated_at)
+            (instagram_link, reference_link, created_at, updated_at)
             VALUES
             (
-                (SELECT id FROM instagram_links WHERE instagram_link = $${0}$$),
                 $${0}$$,
-                (SELECT id FROM reference_links WHERE reference_link = $${1}$$),
                 $${1}$$,
                 '{2}',
                 '{3}'

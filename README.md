@@ -10,6 +10,23 @@ Having an AWS config is required for the functionality of the the downloader. Pl
 This tool is programmed to use postgres. To install postgres, follow this [link](https://www.postgresql.org/download/)
 - It is useful to setup your postgres user to have superadmin access.
 
+Spark requires default-jdk, scala, and git to be used. 
+`sudo apt install default-jdk scala git -y`
+
+To download and install spark:
+```
+wget https://downloads.apache.org/spark/spark-3.0.1/spark-3.0.1-bin-hadoop2.7.tgz
+tar xvf spark-*
+sudo mv spark-3.0.1-bin-hadoop2.7 /opt/spark
+```
+
+Configure Spark Environment:
+```
+echo "export SPARK_HOME=/opt/spark" >> ~/.bash_profile
+echo "export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin" >> ~/.bash_profile
+echo "export PYSPARK_PYTHON=/usr/bin/python3" >> ~/.bash_profile
+```
+
 ## Installation
 
 It is recommended to make a virtual environment before installing python dependencies:

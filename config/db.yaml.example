@@ -1,0 +1,8 @@
+cc_insta:
+  hostname: localhost
+  port: 5432
+  schema: public
+  username: laitcl
+  database: cc_insta
+  password: ex@mple_p@ss1
+  driver: org.postgresql.Driver
