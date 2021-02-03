@@ -2,3 +2,4 @@ tmp/
 cc-env/
 activate
 **__pycache__
+config/db.yaml
