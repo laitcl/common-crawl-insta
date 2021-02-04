@@ -5,7 +5,6 @@ botocore==1.19.32
 bs4==0.0.1
 certifi==2020.11.8
 chardet==3.0.4
--e git+git@github.com:laitcl/common-crawl-insta.git@af6f02a36d0b0c0a5c453752307a8fb5e7aa46cc#egg=common_crawl_insta
 cx-Freeze==6.4.1
 findspark==1.4.2
 idna==2.10
